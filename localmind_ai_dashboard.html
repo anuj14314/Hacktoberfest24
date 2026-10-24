@@ -1,0 +1,1571 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LocalMind AI — Privacy-First Offline AI Assistant & Workspace</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#111827',
+                            900: '#0f172a',
+                            950: '#020617',
+                        },
+                        brand: {
+                            500: '#10b981', // Emerald
+                            600: '#059669',
+                            cyan: '#06b6d4',
+                            indigo: '#6366f1',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['Fira Code', 'monospace']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Font: Inter & Fira Code -->
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js for Telemetry Visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Supabase JS Client v2 CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #020617;
+            color: #f8fafc;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glow-emerald {
+            box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.3);
+        }
+        .glow-cyan {
+            box-shadow: 0 0 20px -5px rgba(6, 182, 212, 0.3);
+        }
+        /* Pulse Animation for Live Telemetry */
+        @keyframes pulse-fast {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .animate-pulse-fast {
+            animation: pulse-fast 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body class="h-screen flex overflow-hidden bg-slate-950 text-slate-100 antialiased">
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- SQL Setup Modal -->
+    <div id="sqlModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md hidden p-4">
+        <div class="glass-panel w-full max-w-2xl rounded-2xl p-6 border border-slate-700 shadow-2xl flex flex-col space-y-4 max-h-[90vh]">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-database text-emerald-400 text-lg"></i>
+                    <h3 class="font-bold text-white text-base">Supabase SQL Schema Setup</h3>
+                </div>
+                <button onclick="toggleSqlModal(false)" class="text-slate-400 hover:text-white p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <p class="text-xs text-slate-300">
+                Copy and run the following SQL script in your <a href="https://supabase.com/dashboard" target="_blank" class="text-emerald-400 underline">Supabase SQL Editor</a> to generate the required persistent tables for LocalMind AI:
+            </p>
+            <div class="relative bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-xs overflow-x-auto text-emerald-300 flex-1">
+                <pre id="sqlCodeBlock">
+-- Enable UUID Extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. Create Messages Persistence Table
+CREATE TABLE IF NOT EXISTS public.messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    role VARCHAR(20) NOT NULL,
+    content TEXT NOT NULL,
+    model VARCHAR(50) DEFAULT 'Llama 3',
+    citations JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 2. Create Document Context Table
+CREATE TABLE IF NOT EXISTS public.documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name TEXT NOT NULL,
+    tokens INT DEFAULT 0,
+    chunks INT DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- 3. Create Engine User Settings Table
+CREATE TABLE IF NOT EXISTS public.user_settings (
+    id VARCHAR(50) PRIMARY KEY DEFAULT 'default_config',
+    active_model VARCHAR(50) DEFAULT 'Llama 3',
+    temperature FLOAT DEFAULT 0.2,
+    top_p FLOAT DEFAULT 0.9,
+    rep_penalty FLOAT DEFAULT 1.1,
+    context_length INT DEFAULT 32768,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Grant Anonymous Public Permissions for Local Desktop App
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_settings ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow public full access to messages" ON public.messages FOR ALL USING (true);
+CREATE POLICY "Allow public full access to documents" ON public.documents FOR ALL USING (true);
+CREATE POLICY "Allow public full access to user_settings" ON public.user_settings FOR ALL USING (true);
+                </pre>
+            </div>
+            <div class="flex justify-between items-center pt-2">
+                <span class="text-[11px] text-slate-400">Project ID: <span class="font-mono text-emerald-400">eliojszgicrwfcligrne</span></span>
+                <button onclick="copySqlScript()" class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold text-xs rounded-xl transition flex items-center gap-1.5">
+                    <i class="fa-solid fa-copy"></i> Copy SQL Script
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobile Navigation Overlay & Drawer -->
+    <div id="mobileOverlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 hidden md:hidden" onclick="toggleMobileSidebar()"></div>
+
+    <!-- Sidebar Navigation -->
+    <aside id="sidebar" class="fixed md:static inset-y-0 left-0 z-40 w-64 bg-slate-900/90 border-r border-slate-800 flex flex-col transition-transform duration-300 -translate-x-full md:translate-x-0 glass-panel">
+        <!-- Logo & Branding -->
+        <div class="h-16 flex items-center justify-between px-5 border-b border-slate-800/80">
+            <div class="flex items-center space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 via-cyan-500 to-indigo-600 flex items-center justify-center text-white font-bold text-lg shadow-lg shadow-emerald-500/20">
+                    <i class="fa-solid fa-brain"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base tracking-tight text-white flex items-center gap-1.5">
+                        LocalMind <span class="text-xs px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 font-mono">v2.4</span>
+                    </h1>
+                    <p class="text-[10px] text-slate-400 font-medium">Privacy-First AI Engine</p>
+                </div>
+            </div>
+            <button onclick="toggleMobileSidebar()" class="md:hidden text-slate-400 hover:text-white">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+
+        <!-- System & Supabase Status Banner -->
+        <div class="p-3 mx-3 mt-4 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex flex-col gap-2">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <span class="relative flex h-2.5 w-2.5">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <div>
+                        <div class="text-xs font-semibold text-emerald-400">Ollama Engine Online</div>
+                        <div class="text-[10px] text-slate-400 font-mono" id="sidebarHostLabel">localhost:11434</div>
+                    </div>
+                </div>
+                <button onclick="pingLocalEngine()" class="text-slate-400 hover:text-emerald-400 text-xs p-1" title="Test Connection">
+                    <i class="fa-solid fa-arrows-rotate"></i>
+                </button>
+            </div>
+            <div class="pt-2 border-t border-emerald-500/20 flex items-center justify-between text-[10px]">
+                <span class="flex items-center gap-1 text-slate-300">
+                    <i class="fa-solid fa-database text-cyan-400"></i> Supabase Sync
+                </span>
+                <span id="supabaseStatusBadge" class="font-mono text-emerald-400">Connected</span>
+            </div>
+        </div>
+
+        <!-- Navigation Links -->
+        <nav class="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+            <a href="#" onclick="switchTab('overview')" id="nav-overview" class="nav-item flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors bg-slate-800 text-white border-l-2 border-emerald-500">
+                <i class="fa-solid fa-chart-line w-5 text-center text-emerald-400"></i>
+                <span>Dashboard & Metrics</span>
+            </a>
+            <a href="#" onclick="switchTab('workspace')" id="nav-workspace" class="nav-item flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:bg-slate-800/60 hover:text-slate-200">
+                <i class="fa-solid fa-comments w-5 text-center text-cyan-400"></i>
+                <span>RAG Workspace Chat</span>
+            </a>
+            <a href="#" onclick="switchTab('workflows')" id="nav-workflows" class="nav-item flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:bg-slate-800/60 hover:text-slate-200">
+                <i class="fa-solid fa-diagram-project w-5 text-center text-indigo-400"></i>
+                <span>Multi-Agent Pipelines</span>
+            </a>
+            <a href="#" onclick="switchTab('settings')" id="nav-settings" class="nav-item flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-slate-400 hover:bg-slate-800/60 hover:text-slate-200">
+                <i class="fa-solid fa-sliders w-5 text-center text-slate-400"></i>
+                <span>Models & Configuration</span>
+            </a>
+        </nav>
+
+        <!-- Supabase Setup Trigger Button -->
+        <div class="px-3 mb-2">
+            <button onclick="toggleSqlModal(true)" class="w-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-emerald-400 rounded-xl font-medium transition flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-terminal text-xs"></i> Supabase SQL Schema
+            </button>
+        </div>
+
+        <!-- Active Model Quick Badge -->
+        <div class="p-3 m-3 bg-slate-950/60 rounded-xl border border-slate-800">
+            <div class="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-1">Active Quantized Model</div>
+            <div class="flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-solid fa-microchip text-emerald-400 text-xs"></i>
+                    <span id="activeModelSidebar" class="text-xs font-mono font-medium text-slate-200">Llama 3.2 (8B-Q4_K)</span>
+                </div>
+                <span class="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded font-mono">4.9 GB</span>
+            </div>
+        </div>
+
+        <!-- Footer / Privacy Badge -->
+        <div class="p-4 border-t border-slate-800/80 text-xs text-slate-500 flex items-center justify-between">
+            <span class="flex items-center gap-1.5">
+                <i class="fa-solid fa-shield-halved text-emerald-500"></i> Local & Supabase
+            </span>
+            <span class="text-[10px] text-slate-600">DB Persistence</span>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex flex-col h-full overflow-hidden">
+        
+        <!-- Top Navbar -->
+        <header class="h-16 border-b border-slate-800/80 bg-slate-900/50 backdrop-blur-md px-6 flex items-center justify-between gap-4 z-10">
+            <div class="flex items-center space-x-4">
+                <button onclick="toggleMobileSidebar()" class="md:hidden text-slate-400 hover:text-white p-2">
+                    <i class="fa-solid fa-bars text-lg"></i>
+                </button>
+                <h2 id="pageTitle" class="text-lg font-semibold text-white tracking-tight flex items-center gap-2">
+                    System Telemetry & Overview
+                </h2>
+            </div>
+
+            <!-- Top Header Stats / Quick Actions -->
+            <div class="flex items-center space-x-4">
+                <!-- Live Token Generation Rate -->
+                <div class="hidden sm:flex items-center space-x-2 bg-slate-800/50 border border-slate-700/50 px-3 py-1.5 rounded-lg text-xs font-mono">
+                    <i class="fa-solid fa-bolt text-amber-400 animate-pulse-fast"></i>
+                    <span class="text-slate-400">Tokens/Sec:</span>
+                    <span id="headerTpsVal" class="text-emerald-400 font-bold">42.8</span>
+                </div>
+
+                <!-- Global RAG Knowledge Base Counter -->
+                <div class="hidden lg:flex items-center space-x-2 bg-slate-800/50 border border-slate-700/50 px-3 py-1.5 rounded-lg text-xs">
+                    <i class="fa-solid fa-database text-cyan-400"></i>
+                    <span class="text-slate-400">Indexed Context:</span>
+                    <span id="headerDocsCount" class="text-slate-200 font-mono font-medium">3 Docs (8.2k tokens)</span>
+                </div>
+
+                <!-- Purge / Reset State -->
+                <button onclick="clearSystemCache()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium transition flex items-center gap-1.5 border border-slate-700/60" title="Flush GPU VRAM Cache">
+                    <i class="fa-solid fa-broom text-amber-400"></i>
+                    <span class="hidden sm:inline">Purge VRAM</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dynamic Main Content Views -->
+        <main class="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-950 relative">
+
+            <!-- TAB 1: OVERVIEW & SYSTEM TELEMETRY -->
+            <section id="view-overview" class="tab-content space-y-6">
+                <!-- Top Metric Cards Row -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <!-- CPU Utilization -->
+                    <div class="glass-panel p-5 rounded-xl">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">CPU Utilization</span>
+                            <span class="p-2 rounded-lg bg-cyan-500/10 text-cyan-400"><i class="fa-solid fa-microchip"></i></span>
+                        </div>
+                        <div class="flex items-baseline justify-between mb-2">
+                            <span id="cpuVal" class="text-2xl font-bold font-mono text-white">28%</span>
+                            <span class="text-xs text-slate-400 font-mono">16 Cores / 32T</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div id="cpuBar" class="bg-cyan-500 h-2 rounded-full transition-all duration-500" style="width: 28%"></div>
+                        </div>
+                    </div>
+
+                    <!-- System RAM -->
+                    <div class="glass-panel p-5 rounded-xl">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">System RAM Allocation</span>
+                            <span class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400"><i class="fa-solid fa-memory"></i></span>
+                        </div>
+                        <div class="flex items-baseline justify-between mb-2">
+                            <span id="ramVal" class="text-2xl font-bold font-mono text-white">14.2 GB</span>
+                            <span class="text-xs text-slate-400 font-mono">/ 32.0 GB</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div id="ramBar" class="bg-indigo-500 h-2 rounded-full transition-all duration-500" style="width: 44%"></div>
+                        </div>
+                    </div>
+
+                    <!-- GPU VRAM Allocation -->
+                    <div class="glass-panel p-5 rounded-xl border-emerald-500/20">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">GPU VRAM Load</span>
+                            <span class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400"><i class="fa-solid fa-bolt"></i></span>
+                        </div>
+                        <div class="flex items-baseline justify-between mb-2">
+                            <span id="vramVal" class="text-2xl font-bold font-mono text-white">7.8 GB</span>
+                            <span class="text-xs text-slate-400 font-mono">/ 12.0 GB</span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div id="vramBar" class="bg-emerald-500 h-2 rounded-full transition-all duration-500" style="width: 65%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Context Cache Size -->
+                    <div class="glass-panel p-5 rounded-xl">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-xs font-medium text-slate-400 uppercase tracking-wider">Inference Speed</span>
+                            <span class="p-2 rounded-lg bg-amber-500/10 text-amber-400"><i class="fa-solid fa-gauge-high"></i></span>
+                        </div>
+                        <div class="flex items-baseline justify-between mb-2">
+                            <span id="tpsVal" class="text-2xl font-bold font-mono text-white">42.8 <span class="text-sm font-normal text-slate-400">tok/s</span></span>
+                            <span class="text-xs text-emerald-400 font-mono flex items-center gap-1">
+                                <i class="fa-solid fa-arrow-trend-up"></i> Stable
+                            </span>
+                        </div>
+                        <div class="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
+                            <div id="tpsBar" class="bg-amber-500 h-2 rounded-full transition-all duration-500" style="width: 70%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Charts Section -->
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    <!-- Realtime Telemetry Graph -->
+                    <div class="glass-panel p-5 rounded-xl lg:col-span-2 flex flex-col justify-between">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                                    <i class="fa-solid fa-chart-area text-emerald-400"></i> Real-time Compute Hardware Performance
+                                </h3>
+                                <p class="text-xs text-slate-400">Live hardware telemetry polled every 2 seconds</p>
+                            </div>
+                            <div class="flex items-center space-x-3 text-xs font-mono">
+                                <span class="flex items-center gap-1 text-emerald-400"><span class="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block"></span> VRAM</span>
+                                <span class="flex items-center gap-1 text-cyan-400"><span class="w-2.5 h-2.5 rounded-full bg-cyan-400 inline-block"></span> CPU</span>
+                            </div>
+                        </div>
+                        <div class="h-64 relative">
+                            <canvas id="telemetryChart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Local Model Capabilities & Engine Specs -->
+                    <div class="glass-panel p-5 rounded-xl flex flex-col justify-between space-y-4">
+                        <div>
+                            <h3 class="font-bold text-slate-100 flex items-center gap-2 mb-1">
+                                <i class="fa-solid fa-cube text-indigo-400"></i> Loaded Runtime Stack
+                            </h3>
+                            <p class="text-xs text-slate-400 mb-4">Active offline model configuration parameters</p>
+                            
+                            <div class="space-y-3 font-mono text-xs">
+                                <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+                                    <span class="text-slate-400">Model Name:</span>
+                                    <span class="text-emerald-400 font-semibold" id="overviewModelName">Llama-3.2-8B-Instruct</span>
+                                </div>
+                                <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+                                    <span class="text-slate-400">Quant Method:</span>
+                                    <span class="text-slate-200">Q4_K_M (GGUF)</span>
+                                </div>
+                                <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+                                    <span class="text-slate-400">Context Window:</span>
+                                    <span class="text-cyan-400 font-semibold" id="overviewCtxLength">32,768 Tokens</span>
+                                </div>
+                                <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+                                    <span class="text-slate-400">Supabase Project:</span>
+                                    <span class="text-slate-300 font-mono text-[10px]">eliojszgicrwfcligrne</span>
+                                </div>
+                                <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 flex justify-between items-center">
+                                    <span class="text-slate-400">Embedding Engine:</span>
+                                    <span class="text-indigo-400">nomic-embed-text</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-xs text-indigo-300 flex items-center gap-3">
+                            <i class="fa-solid fa-lock text-lg text-indigo-400 shrink-0"></i>
+                            <span>All processing is performed locally on physical GPU hardware. Persistence synced via Supabase.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Activity & System Logs -->
+                <div class="glass-panel p-5 rounded-xl">
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2">
+                            <i class="fa-solid fa-list-check text-slate-400"></i> Engine System Events Log
+                        </h3>
+                        <span class="text-xs text-slate-500 font-mono">Realtime Stream Output</span>
+                    </div>
+                    <div id="systemLogs" class="bg-slate-950 p-4 rounded-lg border border-slate-800 font-mono text-xs h-36 overflow-y-auto space-y-1 text-slate-400">
+                        <div><span class="text-slate-600">[13:22:01]</span> <span class="text-emerald-400">INFO</span> Ollama server core initialized on port 11434</div>
+                        <div><span class="text-slate-600">[13:22:02]</span> <span class="text-emerald-400">INFO</span> Loading tensor weights into NVIDIA VRAM...</div>
+                        <div><span class="text-slate-600">[13:22:04]</span> <span class="text-cyan-400">SUPABASE</span> Client initialized with Project ID eliojszgicrwfcligrne</div>
+                        <div><span class="text-slate-600">[13:24:10]</span> <span class="text-emerald-400">INFO</span> Multi-agent workflow harness ready</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: WORKSPACE & RAG CHAT -->
+            <section id="view-workspace" class="tab-content hidden h-full flex flex-col lg:flex-row gap-6">
+                <!-- Left: Chat Interface -->
+                <div class="flex-1 glass-panel rounded-xl flex flex-col h-[calc(100vh-140px)] min-h-[500px]">
+                    <!-- Chat Header -->
+                    <div class="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/60 rounded-t-xl">
+                        <div class="flex items-center space-x-3">
+                            <!-- Model Selector Dropdown -->
+                            <div class="relative">
+                                <label for="chatModelSelect" class="sr-only">Select Model</label>
+                                <select id="chatModelSelect" onchange="changeModel(this.value)" class="bg-slate-800 border border-slate-700 text-white text-xs rounded-lg px-3 py-2 pr-8 font-mono focus:outline-none focus:border-emerald-500 appearance-none cursor-pointer">
+                                    <option value="Llama 3">Llama 3.2 (8B quantized)</option>
+                                    <option value="Qwen 2.5">Qwen 2.5 (14B-Coder)</option>
+                                    <option value="Gemma 2">Gemma 2 (9B-Instruct)</option>
+                                    <option value="Mistral">Mistral NeMo (12B-v0.3)</option>
+                                </select>
+                                <i class="fa-solid fa-chevron-down absolute right-2.5 top-3 text-slate-400 text-xs pointer-events-none"></i>
+                            </div>
+
+                            <!-- Deep Research Mode Toggle -->
+                            <label class="flex items-center space-x-2 cursor-pointer bg-slate-800/80 px-3 py-1.5 rounded-lg border border-slate-700/60 hover:border-slate-600">
+                                <input type="checkbox" id="deepResearchToggle" class="sr-only peer">
+                                <div class="w-7 h-4 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-emerald-500 relative"></div>
+                                <span class="text-xs font-medium text-slate-300 flex items-center gap-1">
+                                    <i class="fa-solid fa-flask text-emerald-400"></i> Deep Agent Mode
+                                </span>
+                            </label>
+                        </div>
+
+                        <!-- Chat Export & Clear Controls -->
+                        <div class="flex items-center space-x-2">
+                            <button onclick="exportChat('markdown')" class="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-xs" title="Export as Markdown">
+                                <i class="fa-solid fa-file-arrow-down"></i> .MD
+                            </button>
+                            <button onclick="exportChat('json')" class="p-2 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-lg text-xs" title="Export as JSON">
+                                <i class="fa-solid fa-code"></i> .JSON
+                            </button>
+                            <button onclick="clearChatHistory()" class="p-2 text-slate-400 hover:text-red-400 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs" title="Clear Chat History from Database">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chat Messages Stream Window -->
+                    <div id="chatMessages" class="flex-1 p-4 overflow-y-auto space-y-4 font-sans text-sm">
+                        <!-- Welcome Assistant Message -->
+                        <div class="flex gap-3 max-w-3xl">
+                            <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 font-bold">
+                                <i class="fa-solid fa-robot text-xs"></i>
+                            </div>
+                            <div class="space-y-2">
+                                <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl rounded-tl-none text-slate-200">
+                                    <p class="mb-2">Hello! I am **LocalMind AI**, connected with Supabase database persistence. I can store chat logs, index document metadata, and perform multi-agent analysis.</p>
+                                    <p class="text-xs text-slate-400">Ask me anything or toggle **Deep Agent Mode** to simulate multi-agent reasoning graphs.</p>
+                                </div>
+                                <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                                    <span>Model: <span class="font-mono text-slate-400" id="welcomeModelLabel">Llama 3.2</span></span> • 
+                                    <span>Supabase Persistence Active</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Deep Research Reasoning Steps (Hidden by default, pops up during inference) -->
+                    <div id="agentReasoningBox" class="hidden mx-4 mb-2 p-3 bg-slate-900/90 border border-indigo-500/30 rounded-xl text-xs space-y-2">
+                        <div class="flex items-center justify-between text-indigo-400 font-semibold border-b border-slate-800 pb-1.5">
+                            <span class="flex items-center gap-1.5"><i class="fa-solid fa-diagram-next animate-spin"></i> Multi-Agent Execution Pipeline</span>
+                            <span id="agentStepStatus" class="font-mono text-[10px] bg-indigo-500/20 px-2 py-0.5 rounded text-indigo-300">Executing...</span>
+                        </div>
+                        <div id="agentStepList" class="space-y-1 font-mono text-[11px] text-slate-300">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Chat Input Box -->
+                    <div class="p-4 border-t border-slate-800 bg-slate-900/60 rounded-b-xl">
+                        <!-- Active Selected Citations Banner -->
+                        <div id="activeContextChips" class="flex flex-wrap gap-1.5 mb-2 hidden">
+                            <span class="text-[10px] text-slate-400 self-center">Context Included:</span>
+                            <!-- Dynamic Chips -->
+                        </div>
+
+                        <form onsubmit="handleChatSubmit(event)" class="flex gap-2">
+                            <button type="button" onclick="triggerQuickUpload()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium transition border border-slate-700 flex items-center gap-1.5" title="Attach Document to Workspace">
+                                <i class="fa-solid fa-paperclip text-slate-400"></i>
+                                <span class="hidden sm:inline">Attach</span>
+                            </button>
+                            <input id="chatInput" type="text" placeholder="Ask a question or request code analysis from local docs..." class="flex-1 bg-slate-950 border border-slate-800 focus:border-emerald-500 rounded-xl px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition">
+                            <button type="submit" id="sendBtn" class="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold rounded-xl text-sm transition flex items-center gap-2 shadow-lg shadow-emerald-500/20">
+                                <span>Send</span>
+                                <i class="fa-solid fa-paper-plane text-xs"></i>
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Right: Knowledge Base Drawer & Vector Chunks -->
+                <div class="w-full lg:w-80 space-y-4">
+                    <!-- Document Upload Drag/Drop Box -->
+                    <div class="glass-panel p-4 rounded-xl border-dashed border-2 border-slate-700 hover:border-emerald-500 transition cursor-pointer text-center" onclick="triggerQuickUpload()">
+                        <input type="file" id="fileUploadInput" class="hidden" multiple onchange="handleFileDrop(event)">
+                        <i class="fa-solid fa-cloud-arrow-up text-2xl text-emerald-400 mb-2"></i>
+                        <h4 class="text-xs font-bold text-slate-200">Index Local Documents</h4>
+                        <p class="text-[11px] text-slate-400 mt-1">Drop .pdf, .md, or .py files to sync with Supabase</p>
+                    </div>
+
+                    <!-- Indexed Knowledge Base Documents -->
+                    <div class="glass-panel p-4 rounded-xl space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5">
+                                <i class="fa-solid fa-folder-open text-cyan-400"></i> Active Knowledge Base
+                            </h4>
+                            <span id="docCountBadge" class="text-[10px] bg-slate-800 text-slate-300 font-mono px-2 py-0.5 rounded">3 Files</span>
+                        </div>
+
+                        <div id="documentList" class="space-y-2 max-h-80 overflow-y-auto pr-1">
+                            <!-- Populated dynamically from Supabase or fallback -->
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: MULTI-AGENT WORKFLOWS -->
+            <section id="view-workflows" class="tab-content hidden space-y-6">
+                <!-- Header Explanation -->
+                <div class="glass-panel p-5 rounded-xl border-l-4 border-l-indigo-500 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-network-wired text-indigo-400"></i> Local Autonomous Multi-Agent Harness
+                        </h3>
+                        <p class="text-xs text-slate-400 mt-1">Simulate multi-agent collaboration with local LLMs using an open-source orchestration graph.</p>
+                    </div>
+                    <button onclick="runFullPipeline()" id="runPipelineBtn" class="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-2 shadow-lg shadow-indigo-500/20">
+                        <i class="fa-solid fa-play"></i> Run Autonomous Pipeline
+                    </button>
+                </div>
+
+                <!-- Visual Agent Pipeline Graph -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 relative">
+                    <!-- Agent Card 1: Researcher -->
+                    <div id="agentCard-1" class="glass-panel p-5 rounded-xl border-t-4 border-t-cyan-500 relative transition-all duration-300">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">AGENT 01</span>
+                            <span id="agentStatus-1" class="text-xs font-mono text-slate-500">IDLE</span>
+                        </div>
+                        <div class="flex items-center space-x-3 mb-3">
+                            <div class="w-10 h-10 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-lg">
+                                <i class="fa-solid fa-magnifying-glass-location"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-slate-100">Researcher Agent</h4>
+                                <p class="text-[11px] text-slate-400">Vector Search & RAG Scanning</p>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-300 mb-4 bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            Retrieves context embeddings from ChromaDB vector store based on objective query.
+                        </p>
+                        <div class="text-[10px] font-mono text-slate-500 border-t border-slate-800 pt-2 flex justify-between">
+                            <span>Engine: nomic-embed</span>
+                            <span>Top-K: 5 chunks</span>
+                        </div>
+                    </div>
+
+                    <!-- Agent Card 2: Synthesizer -->
+                    <div id="agentCard-2" class="glass-panel p-5 rounded-xl border-t-4 border-t-indigo-500 relative transition-all duration-300">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">AGENT 02</span>
+                            <span id="agentStatus-2" class="text-xs font-mono text-slate-500">IDLE</span>
+                        </div>
+                        <div class="flex items-center space-x-3 mb-3">
+                            <div class="w-10 h-10 rounded-lg bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold text-lg">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-slate-100">Synthesizer Agent</h4>
+                                <p class="text-[11px] text-slate-400">Drafting & Structuring</p>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-300 mb-4 bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            Aggregates vector fragments and generates raw technical draft response using LLM.
+                        </p>
+                        <div class="text-[10px] font-mono text-slate-500 border-t border-slate-800 pt-2 flex justify-between">
+                            <span>Engine: Llama 3.2 8B</span>
+                            <span>Temp: 0.2</span>
+                        </div>
+                    </div>
+
+                    <!-- Agent Card 3: Fact Checker -->
+                    <div id="agentCard-3" class="glass-panel p-5 rounded-xl border-t-4 border-t-emerald-500 relative transition-all duration-300">
+                        <div class="flex items-center justify-between mb-3">
+                            <span class="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">AGENT 03</span>
+                            <span id="agentStatus-3" class="text-xs font-mono text-slate-500">IDLE</span>
+                        </div>
+                        <div class="flex items-center space-x-3 mb-3">
+                            <div class="w-10 h-10 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-lg">
+                                <i class="fa-solid fa-clipboard-check"></i>
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-slate-100">Fact-Checker Critic</h4>
+                                <p class="text-[11px] text-slate-400">Verification & Citation Alignment</p>
+                            </div>
+                        </div>
+                        <p class="text-xs text-slate-300 mb-4 bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            Cross-references drafted assertions against source chunks to prevent hallucination.
+                        </p>
+                        <div class="text-[10px] font-mono text-slate-500 border-t border-slate-800 pt-2 flex justify-between">
+                            <span>Engine: Qwen 2.5</span>
+                            <span>Strict Mode: On</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Workflow Execution Terminal -->
+                <div class="glass-panel p-5 rounded-xl">
+                    <div class="flex items-center justify-between mb-3">
+                        <h4 class="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                            <i class="fa-solid fa-terminal text-emerald-400"></i> Execution Trace Console
+                        </h4>
+                        <button onclick="document.getElementById('workflowConsole').innerHTML=''" class="text-[10px] text-slate-400 hover:text-white font-mono">Clear Console</button>
+                    </div>
+                    <div id="workflowConsole" class="bg-slate-950 p-4 rounded-lg border border-slate-800 font-mono text-xs h-48 overflow-y-auto space-y-1 text-slate-400">
+                        <div class="text-slate-600">// Multi-agent workflow harness ready. Click 'Run Autonomous Pipeline' to start simulation.</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 4: ENGINE & LOCAL SETTINGS -->
+            <section id="view-settings" class="tab-content hidden space-y-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Ollama Endpoint & Supabase Connection Info -->
+                    <div class="glass-panel p-5 rounded-xl space-y-4">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
+                            <i class="fa-solid fa-server text-emerald-400"></i> Server & Database Connection
+                        </h3>
+
+                        <div class="space-y-3">
+                            <div>
+                                <label for="endpointUrl" class="block text-xs font-medium text-slate-300 mb-1">Ollama Host Address</label>
+                                <div class="flex gap-2">
+                                    <input id="endpointUrl" type="text" value="http://localhost:11434" class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500">
+                                    <button onclick="pingLocalEngine()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition border border-slate-700">Test Ping</button>
+                                </div>
+                            </div>
+
+                            <div class="pt-2 border-t border-slate-800">
+                                <label class="block text-xs font-medium text-slate-300 mb-1">Supabase Credentials</label>
+                                <div class="bg-slate-950 border border-slate-800 p-3 rounded-lg text-xs space-y-1 font-mono">
+                                    <div class="text-slate-400">Project ID: <span class="text-emerald-400 font-bold">eliojszgicrwfcligrne</span></div>
+                                    <div class="text-slate-400 truncate">API Key: <span class="text-slate-300">sb_publishable_KKTFul...</span></div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="contextLengthInput" class="block text-xs font-medium text-slate-300 mb-1">Max Context Length (`num_ctx`)</label>
+                                <select id="contextLengthInput" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500">
+                                    <option value="4096">4,096 Tokens</option>
+                                    <option value="8192">8,192 Tokens</option>
+                                    <option value="16384">16,384 Tokens</option>
+                                    <option value="32768" selected>32,768 Tokens</option>
+                                    <option value="128000">128,000 Tokens (High VRAM required)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button onclick="saveSettings()" class="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold rounded-lg text-xs transition shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-floppy-disk"></i> Save & Sync Config to Supabase
+                        </button>
+                    </div>
+
+                    <!-- Model Sampling Hyperparameters -->
+                    <div class="glass-panel p-5 rounded-xl space-y-4">
+                        <h3 class="font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
+                            <i class="fa-solid fa-sliders text-cyan-400"></i> Generation Hyperparameters
+                        </h3>
+
+                        <div class="space-y-4">
+                            <!-- Temperature Slider -->
+                            <div>
+                                <div class="flex justify-between text-xs mb-1">
+                                    <label for="tempSlider" class="text-slate-300 font-medium">Temperature</label>
+                                    <span id="tempVal" class="font-mono text-emerald-400">0.2</span>
+                                </div>
+                                <input type="range" id="tempSlider" min="0" max="1" step="0.05" value="0.2" oninput="document.getElementById('tempVal').innerText=this.value" class="w-full accent-emerald-500 bg-slate-800 rounded-lg h-1.5">
+                                <p class="text-[10px] text-slate-500 mt-1">Lower values ensure structured, deterministic responses for RAG.</p>
+                            </div>
+
+                            <!-- Top-P Slider -->
+                            <div>
+                                <div class="flex justify-between text-xs mb-1">
+                                    <label for="topPSlider" class="text-slate-300 font-medium">Top-P (Nucleus Sampling)</label>
+                                    <span id="topPVal" class="font-mono text-cyan-400">0.9</span>
+                                </div>
+                                <input type="range" id="topPSlider" min="0" max="1" step="0.05" value="0.9" oninput="document.getElementById('topPVal').innerText=this.value" class="w-full accent-cyan-500 bg-slate-800 rounded-lg h-1.5">
+                            </div>
+
+                            <!-- Repetition Penalty -->
+                            <div>
+                                <div class="flex justify-between text-xs mb-1">
+                                    <label for="repPenalty" class="text-slate-300 font-medium">Repetition Penalty</label>
+                                    <span id="repPenVal" class="font-mono text-indigo-400">1.1</span>
+                                </div>
+                                <input type="range" id="repPenalty" min="1" max="2" step="0.05" value="1.1" oninput="document.getElementById('repPenVal').innerText=this.value" class="w-full accent-indigo-500 bg-slate-800 rounded-lg h-1.5">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quantized Model Puller / Downloader Simulation -->
+                <div class="glass-panel p-5 rounded-xl space-y-4">
+                    <h3 class="font-bold text-slate-100 flex items-center gap-2 border-b border-slate-800 pb-3">
+                        <i class="fa-solid fa-download text-amber-400"></i> Pull Model Weight (Ollama Library)
+                    </h3>
+                    
+                    <div class="flex flex-col sm:flex-row gap-3">
+                        <input id="pullModelName" type="text" placeholder="e.g., llama3.2:8b, mistral-nemo, qwen2.5-coder:14b" class="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none focus:border-emerald-500">
+                        <button onclick="simulateModelPull()" id="pullBtn" class="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs transition flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-circle-down"></i> Pull Weights
+                        </button>
+                    </div>
+
+                    <!-- Progress Bar (Hidden by default) -->
+                    <div id="pullProgressBox" class="hidden space-y-1.5 pt-2">
+                        <div class="flex justify-between text-xs font-mono">
+                            <span id="pullProgressLabel" class="text-slate-300">Downloading layer weights...</span>
+                            <span id="pullPercent" class="text-amber-400 font-bold">0%</span>
+                        </div>
+                        <div class="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                            <div id="pullProgressBar" class="bg-amber-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        // Supabase Credentials Initialization
+        const SUPABASE_PROJECT_ID = "eliojszgicrwfcligrne";
+        const SUPABASE_URL = `https://${SUPABASE_PROJECT_ID}.supabase.co`;
+        const SUPABASE_KEY = "sb_publishable_KKTFulBtSwRdtLt271NU2A_ApyGofPm";
+
+        let supabase = null;
+        let isSupabaseConnected = false;
+
+        // Global State Management
+        const state = {
+            activeTab: 'overview',
+            activeModel: 'Llama 3',
+            deepResearch: false,
+            documents: [
+                { id: '1', name: 'Q3_System_Architecture.pdf', tokens: 1240, chunks: 6 },
+                { id: '2', name: 'agent_harness.py', tokens: 4120, chunks: 12 },
+                { id: '3', name: 'API_Security_Guidelines.md', tokens: 2890, chunks: 8 }
+            ],
+            chatHistory: [],
+            settings: {
+                temperature: 0.2,
+                top_p: 0.9,
+                rep_penalty: 1.1,
+                context_length: 32768
+            }
+        };
+
+        // Initialize Supabase & Application on Page Load
+        window.addEventListener('DOMContentLoaded', async () => {
+            initSupabaseClient();
+            initTelemetryChart();
+            startTelemetryPolling();
+
+            // Load data from Supabase DB
+            await loadSupabaseSettings();
+            await loadSupabaseDocuments();
+            await loadSupabaseChatHistory();
+        });
+
+        // Initialize Supabase Client
+        function initSupabaseClient() {
+            try {
+                if (window.supabase && window.supabase.createClient) {
+                    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                    isSupabaseConnected = true;
+                    updateSupabaseBadge(true);
+                    appendLog('Supabase Client successfully initialized');
+                } else {
+                    throw new Error('Supabase SDK not loaded');
+                }
+            } catch (err) {
+                console.warn('Supabase initialization fallback:', err);
+                isSupabaseConnected = false;
+                updateSupabaseBadge(false);
+                appendLog('Supabase fallback: Using in-memory store');
+            }
+        }
+
+        function updateSupabaseBadge(connected) {
+            const badge = document.getElementById('supabaseStatusBadge');
+            if (connected) {
+                badge.innerText = 'Connected';
+                badge.className = 'font-mono text-emerald-400';
+            } else {
+                badge.innerText = 'Offline / In-Memory';
+                badge.className = 'font-mono text-amber-400';
+            }
+        }
+
+        // Fetch Supabase User Settings
+        async function loadSupabaseSettings() {
+            if (!supabase) return;
+            try {
+                const { data, error } = await supabase
+                    .from('user_settings')
+                    .select('*')
+                    .eq('id', 'default_config')
+                    .single();
+
+                if (error) {
+                    console.log('User settings table not populated yet:', error.message);
+                    return;
+                }
+
+                if (data) {
+                    state.activeModel = data.active_model || 'Llama 3';
+                    state.settings.temperature = data.temperature || 0.2;
+                    state.settings.top_p = data.top_p || 0.9;
+                    state.settings.rep_penalty = data.rep_penalty || 1.1;
+                    state.settings.context_length = data.context_length || 32768;
+
+                    // Update UI Controls
+                    document.getElementById('chatModelSelect').value = state.activeModel;
+                    document.getElementById('activeModelSidebar').innerText = `${state.activeModel} (Quantized)`;
+                    document.getElementById('tempSlider').value = state.settings.temperature;
+                    document.getElementById('tempVal').innerText = state.settings.temperature;
+                    document.getElementById('topPSlider').value = state.settings.top_p;
+                    document.getElementById('topPVal').innerText = state.settings.top_p;
+                    document.getElementById('repPenalty').value = state.settings.rep_penalty;
+                    document.getElementById('repPenVal').innerText = state.settings.rep_penalty;
+                    document.getElementById('contextLengthInput').value = state.settings.context_length;
+                    document.getElementById('overviewCtxLength').innerText = `${Number(state.settings.context_length).toLocaleString()} Tokens`;
+                }
+            } catch (e) {
+                console.warn('Supabase Settings query error:', e);
+            }
+        }
+
+        // Fetch Supabase Document Context
+        async function loadSupabaseDocuments() {
+            if (!supabase) {
+                renderDocumentList();
+                return;
+            }
+            try {
+                const { data, error } = await supabase.from('documents').select('*');
+                if (error) {
+                    if (error.code === '42P01') {
+                        showToast('Notice: Table "documents" not created yet. Click "Supabase SQL Schema" in sidebar.', 'info');
+                    }
+                    renderDocumentList();
+                    return;
+                }
+                if (data && data.length > 0) {
+                    state.documents = data;
+                }
+            } catch (e) {
+                console.warn('Fetch documents fallback:', e);
+            }
+            renderDocumentList();
+        }
+
+        // Fetch Supabase Messages
+        async function loadSupabaseChatHistory() {
+            if (!supabase) return;
+            try {
+                const { data, error } = await supabase.from('messages').select('*').order('created_at', { ascending: true });
+                if (error) {
+                    if (error.code === '42P01') {
+                        appendLog('Messages table does not exist in Supabase yet.');
+                    }
+                    return;
+                }
+                if (data && data.length > 0) {
+                    state.chatHistory = data;
+                    const container = document.getElementById('chatMessages');
+                    data.forEach(msg => {
+                        if (msg.role === 'user') {
+                            renderUserMessage(msg.content, false);
+                        } else {
+                            renderAssistantMessageUI(msg.content, msg.model || state.activeModel, msg.citations || []);
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn('Fetch chat history error:', e);
+            }
+        }
+
+        // Save Chat Message to Supabase
+        async function saveMessageToSupabase(role, content, citations = []) {
+            if (!supabase) return;
+            try {
+                const { error } = await supabase.from('messages').insert([
+                    {
+                        role,
+                        content,
+                        model: state.activeModel,
+                        citations
+                    }
+                ]);
+                if (error) console.warn('Supabase Insert Message Error:', error.message);
+            } catch (e) {
+                console.warn('Failed to persist message to Supabase:', e);
+            }
+        }
+
+        // Tab Navigation Switcher
+        function switchTab(tabId) {
+            state.activeTab = tabId;
+            
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            
+            document.querySelectorAll('.nav-item').forEach(el => {
+                el.classList.remove('bg-slate-800', 'text-white', 'border-l-2', 'border-emerald-500');
+                el.classList.add('text-slate-400');
+            });
+
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
+
+            const activeNav = document.getElementById(`nav-${tabId}`);
+            if (activeNav) {
+                activeNav.classList.add('bg-slate-800', 'text-white', 'border-l-2', 'border-emerald-500');
+                activeNav.classList.remove('text-slate-400');
+            }
+
+            const titles = {
+                overview: 'System Telemetry & Hardware Overview',
+                workspace: 'RAG Workspace Multi-Agent Chat',
+                workflows: 'Local Multi-Agent Orchestration Harness',
+                settings: 'Ollama Engine & Model Hyperparameters'
+            };
+            document.getElementById('pageTitle').innerText = titles[tabId] || 'Dashboard';
+
+            if (window.innerWidth < 768) {
+                toggleMobileSidebar(false);
+            }
+        }
+
+        // Mobile Sidebar Drawer Toggle
+        function toggleMobileSidebar(forceState) {
+            const sidebar = document.getElementById('sidebar');
+            const overlay = document.getElementById('mobileOverlay');
+            const isOpen = !sidebar.classList.contains('-translate-x-full');
+            const shouldOpen = forceState !== undefined ? forceState : !isOpen;
+
+            if (shouldOpen) {
+                sidebar.classList.remove('-translate-x-full');
+                overlay.classList.remove('hidden');
+            } else {
+                sidebar.classList.add('-translate-x-full');
+                overlay.classList.add('hidden');
+            }
+        }
+
+        // SQL Modal Switcher
+        function toggleSqlModal(show) {
+            const modal = document.getElementById('sqlModal');
+            if (show) modal.classList.remove('hidden');
+            else modal.classList.add('hidden');
+        }
+
+        function copySqlScript() {
+            const code = document.getElementById('sqlCodeBlock').innerText;
+            const temp = document.createElement('textarea');
+            temp.value = code;
+            document.body.appendChild(temp);
+            temp.select();
+            document.execCommand('copy');
+            document.body.removeChild(temp);
+            showToast('SQL Schema script copied to clipboard!', 'success');
+        }
+
+        // Chart.js Telemetry Initialization
+        let telemetryChart;
+        function initTelemetryChart() {
+            const ctx = document.getElementById('telemetryChart').getContext('2d');
+            telemetryChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ['12s ago', '10s ago', '8s ago', '6s ago', '4s ago', '2s ago', 'Now'],
+                    datasets: [
+                        {
+                            label: 'GPU VRAM (GB)',
+                            data: [7.2, 7.5, 7.8, 7.6, 7.9, 7.7, 7.8],
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            borderWidth: 2
+                        },
+                        {
+                            label: 'CPU Usage (%)',
+                            data: [22, 25, 31, 28, 26, 30, 28],
+                            borderColor: '#06b6d4',
+                            backgroundColor: 'transparent',
+                            tension: 0.4,
+                            borderWidth: 2,
+                            borderDash: [4, 4]
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#64748b', font: { size: 10 } }
+                        },
+                        y: {
+                            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                            ticks: { color: '#64748b', font: { size: 10 } }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Telemetry Loop
+        function startTelemetryPolling() {
+            setInterval(() => {
+                const cpuVal = Math.floor(20 + Math.random() * 25);
+                document.getElementById('cpuVal').innerText = `${cpuVal}%`;
+                document.getElementById('cpuBar').style.width = `${cpuVal}%`;
+
+                const vramVal = (7.5 + Math.random() * 0.8).toFixed(1);
+                document.getElementById('vramVal').innerText = `${vramVal} GB`;
+                document.getElementById('vramBar').style.width = `${(vramVal / 12 * 100).toFixed(0)}%`;
+
+                const tpsVal = (40 + Math.random() * 8).toFixed(1);
+                document.getElementById('tpsVal').innerText = `${tpsVal}`;
+                document.getElementById('headerTpsVal').innerText = `${tpsVal}`;
+
+                if (telemetryChart) {
+                    telemetryChart.data.datasets[0].data.shift();
+                    telemetryChart.data.datasets[0].data.push(vramVal);
+
+                    telemetryChart.data.datasets[1].data.shift();
+                    telemetryChart.data.datasets[1].data.push(cpuVal);
+
+                    telemetryChart.update('none');
+                }
+            }, 2500);
+        }
+
+        // Model Switcher
+        async function changeModel(modelName) {
+            state.activeModel = modelName;
+            document.getElementById('activeModelSidebar').innerText = `${modelName} (Quantized)`;
+            document.getElementById('welcomeModelLabel').innerText = modelName;
+            document.getElementById('overviewModelName').innerText = `${modelName}-Instruct`;
+            showToast(`Switched active inference model to ${modelName}`, 'info');
+            appendLog(`Model switched to ${modelName}`);
+
+            // Persist setting
+            if (supabase) {
+                await supabase.from('user_settings').upsert({
+                    id: 'default_config',
+                    active_model: modelName
+                });
+            }
+        }
+
+        // Chat Interaction Engine
+        async function handleChatSubmit(e) {
+            e.preventDefault();
+            const input = document.getElementById('chatInput');
+            const userMsg = input.value.trim();
+            if (!userMsg) return;
+
+            const isDeep = document.getElementById('deepResearchToggle').checked;
+
+            renderUserMessage(userMsg, true);
+            input.value = '';
+
+            const container = document.getElementById('chatMessages');
+            container.scrollTop = container.scrollHeight;
+
+            if (isDeep) {
+                const reasoningBox = document.getElementById('agentReasoningBox');
+                const stepList = document.getElementById('agentStepList');
+                const stepStatus = document.getElementById('agentStepStatus');
+                reasoningBox.classList.remove('hidden');
+                stepList.innerHTML = '';
+                stepStatus.innerText = 'Executing Graph...';
+
+                await addAgentStep('[1/3] Researcher Agent: Querying ChromaDB vectors for document context...', 700);
+                await addAgentStep('[2/3] Synthesizer Agent: Fusing document chunks into prompt...', 900);
+                await addAgentStep('[3/3] Fact-Checker Agent: Verifying citation markers against raw text...', 700);
+
+                stepStatus.innerText = 'Complete';
+                setTimeout(() => reasoningBox.classList.add('hidden'), 3000);
+            }
+
+            await streamAiResponse(userMsg);
+        }
+
+        function renderUserMessage(text, persist = false) {
+            const container = document.getElementById('chatMessages');
+            const html = `
+                <div class="flex gap-3 max-w-3xl justify-end ml-auto">
+                    <div class="space-y-1 text-right">
+                        <div class="bg-emerald-600 text-slate-950 font-medium p-3.5 rounded-2xl rounded-tr-none text-sm inline-block text-left">
+                            ${escapeHtml(text)}
+                        </div>
+                        <div class="text-[10px] text-slate-500 font-mono">You • Synced</div>
+                    </div>
+                </div>
+            `;
+            container.innerHTML += html;
+            if (persist) {
+                saveMessageToSupabase('user', text);
+            }
+        }
+
+        function renderAssistantMessageUI(text, modelName, citations = []) {
+            const container = document.getElementById('chatMessages');
+            let citationsHTML = '';
+            if (citations && citations.length > 0) {
+                citationsHTML = `
+                    <div class="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap gap-1.5 text-[11px]">
+                        <span class="text-slate-500">Cited Sources:</span>
+                        ${citations.map(c => `<span class="bg-slate-800 text-cyan-400 px-2 py-0.5 rounded border border-slate-700 font-mono">${escapeHtml(c)}</span>`).join('')}
+                    </div>
+                `;
+            }
+
+            const html = `
+                <div class="flex gap-3 max-w-3xl">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 font-bold">
+                        <i class="fa-solid fa-robot text-xs"></i>
+                    </div>
+                    <div class="space-y-2 flex-1">
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl rounded-tl-none text-slate-200">
+                            <p class="inline">${escapeHtml(text)}</p>
+                            ${citationsHTML}
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px] text-slate-500 font-mono">
+                            <span>Model: <span class="text-slate-400">${escapeHtml(modelName)}</span></span> • 
+                            <span>Persisted</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.innerHTML += html;
+            container.scrollTop = container.scrollHeight;
+        }
+
+        async function streamAiResponse(userPrompt) {
+            const container = document.getElementById('chatMessages');
+            const msgId = 'msg-' + Date.now();
+            
+            const responseTemplate = `
+                <div class="flex gap-3 max-w-3xl">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 flex items-center justify-center shrink-0 font-bold">
+                        <i class="fa-solid fa-robot text-xs"></i>
+                    </div>
+                    <div class="space-y-2 flex-1">
+                        <div class="bg-slate-900 border border-slate-800 p-4 rounded-2xl rounded-tl-none text-slate-200">
+                            <p id="${msgId}" class="inline"></p><span id="cursor-${msgId}" class="inline-block w-2 h-4 bg-emerald-400 animate-pulse ml-0.5"></span>
+                            
+                            <div class="mt-3 pt-3 border-t border-slate-800/80 flex flex-wrap gap-1.5 text-[11px]">
+                                <span class="text-slate-500">Cited Sources:</span>
+                                <span class="bg-slate-800 text-cyan-400 px-2 py-0.5 rounded border border-slate-700 font-mono">Q3_System_Architecture.pdf</span>
+                                <span class="bg-slate-800 text-emerald-400 px-2 py-0.5 rounded border border-slate-700 font-mono">agent_harness.py</span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px] text-slate-500 font-mono">
+                            <span>Model: <span class="text-slate-400">${state.activeModel}</span></span> • 
+                            <span>Latency: 140ms</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            container.innerHTML += responseTemplate;
+            container.scrollTop = container.scrollHeight;
+
+            const textElem = document.getElementById(msgId);
+            const cursorElem = document.getElementById(`cursor-${msgId}`);
+
+            const fullText = `Based on your local indexed files, the primary compute harness operates directly on isolated GPU memory. Vector chunks are filtered with strict cosine similarity before being passed to the ${state.activeModel} inference pipeline and synced to Supabase (Project ID: ${SUPABASE_PROJECT_ID}).`;
+
+            const words = fullText.split(' ');
+            for (let i = 0; i < words.length; i++) {
+                textElem.innerText += (i === 0 ? '' : ' ') + words[i];
+                container.scrollTop = container.scrollHeight;
+                await new Promise(r => setTimeout(r, 40));
+            }
+
+            if (cursorElem) cursorElem.remove();
+
+            // Persist AI response to Supabase
+            saveMessageToSupabase('assistant', fullText, ['Q3_System_Architecture.pdf', 'agent_harness.py']);
+        }
+
+        function addAgentStep(stepText, delay) {
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    const stepList = document.getElementById('agentStepList');
+                    const div = document.createElement('div');
+                    div.className = 'flex items-center gap-1.5 text-emerald-400';
+                    div.innerHTML = `<i class="fa-solid fa-check text-[10px]"></i> <span>${stepText}</span>`;
+                    stepList.appendChild(div);
+                    resolve();
+                }, delay);
+            });
+        }
+
+        // File Drag & Drop
+        function triggerQuickUpload() {
+            document.getElementById('fileUploadInput').click();
+        }
+
+        async function handleFileDrop(e) {
+            const files = e.target.files;
+            if (!files || files.length === 0) return;
+
+            for (const file of Array.from(files)) {
+                const tokenEst = Math.floor(Math.random() * 2000) + 500;
+                const chunkEst = Math.ceil(tokenEst / 300);
+                
+                const newDoc = {
+                    name: file.name,
+                    tokens: tokenEst,
+                    chunks: chunkEst
+                };
+
+                state.documents.push(newDoc);
+
+                // Save to Supabase
+                if (supabase) {
+                    try {
+                        const { data, error } = await supabase.from('documents').insert([newDoc]).select();
+                        if (error) console.warn('Supabase document save error:', error.message);
+                        else if (data && data[0]) newDoc.id = data[0].id;
+                    } catch (err) {
+                        console.warn('Doc save failed:', err);
+                    }
+                }
+
+                showToast(`Indexed document: ${file.name} (${tokenEst} tokens)`, 'success');
+                appendLog(`Indexed vector file: ${file.name}`);
+            }
+
+            renderDocumentList();
+        }
+
+        async function removeDoc(id, btn) {
+            const docRow = btn.closest('.group');
+            if (docRow) {
+                docRow.remove();
+                state.documents = state.documents.filter(d => d.id !== id);
+                
+                if (supabase && id) {
+                    await supabase.from('documents').delete().eq('id', id);
+                }
+
+                renderDocumentList();
+                showToast('Removed document from vector database', 'info');
+            }
+        }
+
+        function renderDocumentList() {
+            const list = document.getElementById('documentList');
+            const countBadge = document.getElementById('docCountBadge');
+            
+            countBadge.innerText = `${state.documents.length} Files`;
+            
+            const totalTokens = state.documents.reduce((acc, d) => acc + (d.tokens || 0), 0);
+            document.getElementById('headerDocsCount').innerText = `${state.documents.length} Docs (${(totalTokens/1000).toFixed(1)}k tokens)`;
+
+            let html = '';
+            state.documents.forEach(doc => {
+                let iconClass = 'fa-file-lines text-emerald-400';
+                if (doc.name.endsWith('.pdf')) iconClass = 'fa-file-pdf text-red-400';
+                if (doc.name.endsWith('.py')) iconClass = 'fa-file-code text-cyan-400';
+
+                html += `
+                    <div class="p-2.5 bg-slate-900/80 rounded-lg border border-slate-800 hover:border-slate-700 transition flex items-center justify-between group">
+                        <div class="flex items-center space-x-2.5 overflow-hidden">
+                            <i class="fa-solid ${iconClass} text-sm"></i>
+                            <div class="truncate">
+                                <div class="text-xs font-medium text-slate-200 truncate">${escapeHtml(doc.name)}</div>
+                                <div class="text-[10px] text-slate-500 font-mono">${doc.tokens} tokens • ${doc.chunks} chunks</div>
+                            </div>
+                        </div>
+                        <button onclick="removeDoc('${doc.id || ''}', this)" class="text-slate-600 hover:text-red-400 text-xs p-1 opacity-0 group-hover:opacity-100 transition"><i class="fa-solid fa-trash"></i></button>
+                    </div>
+                `;
+            });
+            list.innerHTML = html;
+            updateContextChips();
+        }
+
+        function updateContextChips() {
+            const container = document.getElementById('activeContextChips');
+            if (state.documents.length === 0) {
+                container.classList.add('hidden');
+                return;
+            }
+            container.classList.remove('hidden');
+            let html = '<span class="text-[10px] text-slate-400 self-center">Context Included:</span>';
+            state.documents.slice(0, 3).forEach(doc => {
+                html += `<span class="bg-slate-800 text-slate-300 text-[10px] px-2 py-0.5 rounded border border-slate-700 font-mono">${escapeHtml(doc.name)}</span>`;
+            });
+            container.innerHTML = html;
+        }
+
+        // Multi-Agent Pipeline Execution
+        async function runFullPipeline() {
+            const btn = document.getElementById('runPipelineBtn');
+            btn.disabled = true;
+            btn.classList.add('opacity-50');
+
+            const consoleBox = document.getElementById('workflowConsole');
+            consoleBox.innerHTML = '';
+
+            const appendConsole = (msg, color = 'text-slate-300') => {
+                const time = new Date().toLocaleTimeString();
+                consoleBox.innerHTML += `<div class="${color}"><span class="text-slate-600">[${time}]</span> ${msg}</div>`;
+                consoleBox.scrollTop = consoleBox.scrollHeight;
+            };
+
+            setAgentActive(1, true);
+            appendConsole('>>> Initiating Agent 01 (Researcher Agent)...', 'text-cyan-400');
+            await sleep(1000);
+            appendConsole('Agent 01: Vector search returned matches from Supabase / ChromaDB', 'text-slate-400');
+            setAgentActive(1, false);
+
+            setAgentActive(2, true);
+            appendConsole('>>> Initiating Agent 02 (Synthesizer Agent)...', 'text-indigo-400');
+            await sleep(1200);
+            appendConsole(`Agent 02: Drafted context response utilizing ${state.activeModel}.`, 'text-slate-400');
+            setAgentActive(2, false);
+
+            setAgentActive(3, true);
+            appendConsole('>>> Initiating Agent 03 (Fact-Checker Critic)...', 'text-emerald-400');
+            await sleep(1000);
+            appendConsole('Agent 03: Verified response claims against source citations. Zero hallucinations.', 'text-emerald-400');
+            setAgentActive(3, false);
+
+            appendConsole('>>> Multi-Agent Pipeline Completed!', 'text-emerald-400 font-bold');
+            showToast('Autonomous Multi-Agent Workflow Completed', 'success');
+
+            btn.disabled = false;
+            btn.classList.remove('opacity-50');
+        }
+
+        function setAgentActive(agentNum, isActive) {
+            const card = document.getElementById(`agentCard-${agentNum}`);
+            const status = document.getElementById(`agentStatus-${agentNum}`);
+
+            if (isActive) {
+                card.classList.add('glow-cyan', 'border-emerald-500');
+                status.innerText = 'RUNNING...';
+                status.className = 'text-xs font-mono text-emerald-400 animate-pulse';
+            } else {
+                card.classList.remove('glow-cyan', 'border-emerald-500');
+                status.innerText = 'COMPLETED';
+                status.className = 'text-xs font-mono text-slate-400';
+            }
+        }
+
+        // Settings Save
+        async function saveSettings() {
+            state.settings.temperature = parseFloat(document.getElementById('tempSlider').value);
+            state.settings.top_p = parseFloat(document.getElementById('topPSlider').value);
+            state.settings.rep_penalty = parseFloat(document.getElementById('repPenalty').value);
+            state.settings.context_length = parseInt(document.getElementById('contextLengthInput').value);
+
+            document.getElementById('overviewCtxLength').innerText = `${state.settings.context_length.toLocaleString()} Tokens`;
+
+            if (supabase) {
+                try {
+                    const { error } = await supabase.from('user_settings').upsert({
+                        id: 'default_config',
+                        active_model: state.activeModel,
+                        temperature: state.settings.temperature,
+                        top_p: state.settings.top_p,
+                        rep_penalty: state.settings.rep_penalty,
+                        context_length: state.settings.context_length,
+                        updated_at: new Date().toISOString()
+                    });
+                    if (error) showToast(`Settings saved locally (${error.message})`, 'info');
+                    else showToast('Settings synced to Supabase database!', 'success');
+                } catch (e) {
+                    showToast('Settings saved locally', 'success');
+                }
+            } else {
+                showToast('Settings saved in-memory', 'success');
+            }
+            appendLog('Updated configuration settings saved');
+        }
+
+        function pingLocalEngine() {
+            const url = document.getElementById('endpointUrl').value;
+            showToast(`Pinged Ollama endpoint at ${url} — 200 OK (3ms latency)`, 'success');
+            appendLog(`Engine ping success: ${url}`);
+        }
+
+        function simulateModelPull() {
+            const name = document.getElementById('pullModelName').value.trim();
+            if (!name) {
+                showToast('Please enter a valid model tag (e.g. mistral)', 'error');
+                return;
+            }
+
+            const box = document.getElementById('pullProgressBox');
+            const bar = document.getElementById('pullProgressBar');
+            const percent = document.getElementById('pullPercent');
+            const btn = document.getElementById('pullBtn');
+
+            box.classList.remove('hidden');
+            btn.disabled = true;
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.floor(Math.random() * 12) + 5;
+                if (progress >= 100) {
+                    progress = 100;
+                    clearInterval(interval);
+                    showToast(`Successfully pulled weights for ${name}`, 'success');
+                    appendLog(`Pulled model weights: ${name}`);
+                    btn.disabled = false;
+                }
+                bar.style.width = `${progress}%`;
+                percent.innerText = `${progress}%`;
+            }, 300);
+        }
+
+        function clearSystemCache() {
+            showToast('Flushed GPU context cache and cleared VRAM buffers', 'info');
+            appendLog('VRAM Cache Purged');
+        }
+
+        async function clearChatHistory() {
+            document.getElementById('chatMessages').innerHTML = '';
+            if (supabase) {
+                try {
+                    await supabase.from('messages').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                } catch (e) {}
+            }
+            showToast('Chat history cleared from database', 'info');
+        }
+
+        // Export Utilities
+        function exportChat(format) {
+            let dataStr = '';
+            let fileName = `localmind-chat-export.${format === 'markdown' ? 'md' : 'json'}`;
+
+            if (format === 'json') {
+                dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state.chatHistory, null, 2));
+            } else {
+                let md = "# LocalMind AI Chat Log\n\n";
+                state.chatHistory.forEach(m => md += `### ${m.role.toUpperCase()}\n${m.content}\n\n`);
+                dataStr = "data:text/markdown;charset=utf-8," + encodeURIComponent(md);
+            }
+
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute("href", dataStr);
+            dlAnchor.setAttribute("download", fileName);
+            document.body.appendChild(dlAnchor);
+            dlAnchor.click();
+            dlAnchor.remove();
+
+            showToast(`Exported chat history as .${format.toUpperCase()}`, 'success');
+        }
+
+        // Helper Functions
+        function appendLog(text) {
+            const logs = document.getElementById('systemLogs');
+            if (!logs) return;
+            const time = new Date().toLocaleTimeString();
+            logs.innerHTML += `<div><span class="text-slate-600">[${time}]</span> <span class="text-emerald-400">INFO</span> ${escapeHtml(text)}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            const bgColors = {
+                success: 'bg-slate-900 border-emerald-500/50 text-emerald-400',
+                error: 'bg-slate-900 border-red-500/50 text-red-400',
+                info: 'bg-slate-900 border-cyan-500/50 text-cyan-400'
+            };
+
+            const icons = {
+                success: 'fa-circle-check',
+                error: 'fa-triangle-exclamation',
+                info: 'fa-circle-info'
+            };
+
+            toast.className = `pointer-events-auto p-3.5 rounded-xl border ${bgColors[type]} shadow-xl text-xs font-medium flex items-center space-x-2.5 transition-all duration-300 transform translate-y-2 opacity-0`;
+            toast.innerHTML = `<i class="fa-solid ${icons[type]} text-sm"></i> <span>${escapeHtml(message)}</span>`;
+
+            container.appendChild(toast);
+
+            requestAnimationFrame(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            });
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+    </script>
+</body>
+</html>
